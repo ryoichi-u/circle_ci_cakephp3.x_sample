@@ -1,0 +1,51 @@
+---
+version: 2
+jobs:
+  build:
+    working_directory: ~/lancers
+    docker:
+      - image: thatsamguy/trusty-php71:latest
+        environment:
+          DB_HOST: 127.0.0.1
+          MEMCACHED_HOST: 127.0.0.1
+          TZ: "/usr/share/zoneinfo/Asia/Tokyo"
+      - image: circleci/mysql:5.6
+        environment:
+          - TZ="/usr/share/zoneinfo/Asia/Tokyo"
+          - MYSQL_USER=root
+          - MYSQL_ALLOW_EMPTY_PASSWORD=yes
+      - image: memcached:latest
+        environment:
+          TZ: "/usr/share/zoneinfo/Asia/Tokyo"
+    steps:
+      - checkout
+      - run: sh/circle_prepare.sh
+      - restore_cache:
+          name: restore composer cache
+          keys:
+            - composer-myapp-{{ .Branch }}-{{ checksum "composer.lock" }}
+            - composer-myapp-{{ .Branch }}
+            - composer-myapp
+      - run: |
+          php -r "readfile('https://getcomposer.org/installer');" | php
+          php composer.phar install -n --prefer-dist
+      - save_cache:
+          key: composer-myapp-{{ .Branch }}-{{ checksum "composer.lock" }}
+          paths:
+            - ./vendor
+      - run:
+          name: database
+          command: |
+              mysql -h 127.0.0.1 -u root < sql/create_dev.sql
+              bin/cake migrations migrate
+      - run:
+          name: tests
+          command: |
+              sh/php_cs_fixer.sh
+              sh/php_syntax.sh
+              sh/phpmd_check.sh
+              vendor/bin/phpunit --configuration phpunit.xml.dist --log-junit ~/phpunit/junit.xml
+      - store_test_results:
+          path: ~/phpunit
+      - store_artifacts:
+          path: ~/phpunit
